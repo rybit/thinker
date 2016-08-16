@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/Sirupsen/logrus"
 	r "github.com/dancannon/gorethink"
@@ -11,16 +12,26 @@ import (
 	"github.com/spf13/viper"
 )
 
+type conf struct {
+	Host    string `mapstructure:"host"`
+	Port    int    `mapstructure:"port"`
+	AuthKey string `mapstructure:"key"`
+	Debug   bool   `mapstructure:"debug"`
+	Follow  bool   `mapstructure:"follow"`
+}
+
 func main() {
 	root := cobra.Command{
 		Use:  "thinker <db> <table> <index> <id>",
 		RunE: run,
 	}
 
-	root.PersistentFlags().BoolP("debug", "d", false, "enable debug logging")
+	root.PersistentFlags().StringP("config", "c", "", "a config file to use")
 	root.PersistentFlags().StringP("host", "H", "localhost", "host to use for rethink")
 	root.PersistentFlags().StringP("key", "k", "", "the auth key to use when connecting")
 	root.PersistentFlags().IntP("port", "p", 28015, "port to use for rethink")
+	root.PersistentFlags().BoolP("debug", "d", false, "enable debug logging")
+	root.PersistentFlags().BoolP("follow", "f", false, "if we should follow changes")
 
 	if c, err := root.ExecuteC(); err != nil {
 		log.Fatalf("Failed to execute command %s - %s", c.Name(), err.Error())
@@ -36,19 +47,15 @@ func run(cmd *cobra.Command, args []string) error {
 	index := args[2]
 	id := args[3]
 
-	loadConfiguration(cmd)
+	config := loadConfiguration(cmd)
+	_ = config
 
-	host := viper.GetString("host")
-	port := viper.GetInt("port")
-	authKey := viper.GetString("authKey")
-	url := fmt.Sprintf("%s:%d", host, port)
-	if url == "" {
-		return errors.New("url is invalid")
-	}
+	url, err := config.GetURL()
 
 	l := logrus.WithFields(logrus.Fields{
-		"host":  host,
-		"port":  port,
+		"host":  config.Host,
+		"port":  config.Port,
+		"url":   url,
 		"table": table,
 		"db":    db,
 		"index": index,
@@ -59,15 +66,27 @@ func run(cmd *cobra.Command, args []string) error {
 		Addresses:     []string{url},
 		Database:      db,
 		DiscoverHosts: true,
-		AuthKey:       authKey,
+		AuthKey:       config.AuthKey,
 	})
 	if err != nil {
 		return err
 	}
 
 	l.Infof("Querying for '%s'", id)
-	r.SetVerbose(true)
-	resp, err := r.DB(db).Table(table).Filter(r.Row.Field(index).Eq(id)).Changes(r.ChangesOpts{IncludeInitial: true}).Run(conn)
+
+	if config.Debug {
+		r.SetVerbose(true)
+	}
+
+	tableRef := r.DB(db).Table(table)
+	var resp *r.Cursor
+	if config.Follow {
+		l.Info("doing follow query")
+		resp, err = tableRef.Filter(r.Row.Field(index).Eq(id)).Changes(r.ChangesOpts{IncludeInitial: true}).Run(conn)
+	} else {
+		l.Info("doing get all")
+		resp, err = tableRef.GetAllByIndex(index, id).Run(conn)
+	}
 	if err != nil {
 		return err
 	}
@@ -85,15 +104,43 @@ func run(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func loadConfiguration(cmd *cobra.Command) {
+func loadConfiguration(cmd *cobra.Command) *conf {
 	viper.BindPFlags(cmd.PersistentFlags())
 	viper.BindPFlags(cmd.Flags())
 
-	if viper.GetBool("debug") {
-		logrus.SetLevel(logrus.DebugLevel)
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	viper.SetEnvPrefix("thinker")
+	viper.AutomaticEnv()
+
+	if confFile := viper.GetString("config"); confFile != "" {
+		viper.SetConfigFile(confFile)
 	}
 
 	logrus.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp: true,
 	})
+
+	config := new(conf)
+	if err := viper.Unmarshal(config); err != nil {
+		logrus.WithError(err).Fatal("Failed to load configuration")
+	}
+
+	if config.Debug {
+		logrus.SetLevel(logrus.DebugLevel)
+	}
+
+	return config
+}
+
+func (c *conf) GetURL() (string, error) {
+	var url string
+	if c.Port > 0 {
+		url = fmt.Sprintf("%s:%d", c.Host, c.Port)
+	} else {
+		url = c.Host
+	}
+	if url == "" {
+		return "", errors.New("url is invalid")
+	}
+	return url, nil
 }
