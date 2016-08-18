@@ -28,12 +28,18 @@ func RootCmd() *cobra.Command {
 		Use:  "create <db> <table>",
 		RunE: create,
 	}
-	createCmd.Flags().StringSliceP("index", "i", []string{}, "an index to create")
+	createCmd.Flags().StringSliceP("index", "i", nil, "an index to create")
 
 	describeCmd := cobra.Command{
 		Use:  "describe [db]",
 		RunE: describe,
 	}
+
+	purgeCmd := cobra.Command{
+		Use:  "purge <db> <table> [index id]",
+		RunE: purge,
+	}
+	purgeCmd.Flags().BoolP("silent", "s", false, "if we should dump the lines found")
 
 	root := cobra.Command{}
 	root.PersistentFlags().StringP("config", "c", "", "a config file to use")
@@ -41,7 +47,7 @@ func RootCmd() *cobra.Command {
 	root.PersistentFlags().StringP("key", "k", "", "the auth key to use when connecting")
 	root.PersistentFlags().IntP("port", "p", 28015, "port to use for rethink")
 	root.PersistentFlags().BoolP("verbose", "v", false, "enable debug logging")
-	root.AddCommand(&writeCmd, &readCmd, &createCmd, &describeCmd)
+	root.AddCommand(&writeCmd, &readCmd, &createCmd, &describeCmd, &purgeCmd)
 
 	return &root
 }

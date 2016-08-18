@@ -3,7 +3,6 @@ package cmds
 import (
 	r "github.com/dancannon/gorethink"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 func create(cmd *cobra.Command, args []string) error {
@@ -48,8 +47,10 @@ func create(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-
-	indices := viper.GetStringSlice("index")
+	indices, _ := cmd.Flags().GetStringSlice("index")
+	if err != nil {
+		return err
+	}
 	for _, i := range indices {
 		if !containsString(i, listOfIndexes) {
 			log.WithField("index", i).Debug("Creating index")
