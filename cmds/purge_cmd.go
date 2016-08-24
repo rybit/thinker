@@ -47,7 +47,7 @@ func purge(cmd *cobra.Command, args []string) error {
 	if !viper.GetBool("silent") {
 		fmt.Printf("Deleted %d rows\n", rsp.Deleted)
 		for i, changeRsp := range rsp.Changes {
-			fmt.Printf("Deleted: %d: %+v\n", i, changeRsp.OldValue)
+			fmt.Printf("Deleted: %d: %+v\n", i, changeRsp.OldValue.(map[string]interface{}))
 		}
 	}
 
